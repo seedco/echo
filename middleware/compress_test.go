@@ -5,9 +5,13 @@ import (
 	"compress/gzip"
 	"io/ioutil"
 	"net/http"
+	"net/http/httputil"
+	"net/url"
 	"testing"
+	"time"
 
 	"github.com/labstack/echo"
+	"github.com/labstack/echo/engine/standard"
 	"github.com/labstack/echo/test"
 	"github.com/stretchr/testify/assert"
 )
@@ -77,4 +81,29 @@ func TestGzipErrorReturned(t *testing.T) {
 	if assert.NoError(t, err) {
 		assert.Equal(t, "error", string(b))
 	}
+}
+
+func TestGzipReverseProxy(t *testing.T) {
+	backend := echo.New()
+	backend.Get("/", echo.HandlerFunc(func(c echo.Context) error {
+		return c.String(200, "Hello, world!")
+	}))
+	go backend.Run(standard.New(":2000"))
+
+	backendURL, err := url.Parse("http://127.0.0.1:2000")
+	assert.NoError(t, err)
+
+	frontend := echo.New()
+	frontend.Use(Gzip())
+	frontend.Get("/", standard.WrapHandler(httputil.NewSingleHostReverseProxy(backendURL)))
+	go frontend.Run(standard.New(":4000"))
+
+	time.Sleep(time.Millisecond * 10)
+
+	resp, err := http.Get("http://127.0.0.1:4000")
+	assert.NoError(t, err)
+	defer resp.Body.Close()
+	body, err := ioutil.ReadAll(resp.Body)
+	assert.NoError(t, err)
+	assert.Equal(t, "Hello, world!", string(body))
 }
